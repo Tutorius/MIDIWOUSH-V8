@@ -10,6 +10,7 @@ Files for ARDUINO IDE. Used Hardware ESP32-S3-WROOM (AliExpress), TCA9548A, GY-M
 b.) PCB
 KiCAD-Files
 
+To Do:
 c.) PCB-Production
 PCBWay-Link to project
 
