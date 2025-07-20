@@ -1,10 +1,25 @@
 /* ---------------------------------------
+   | Changes Hartmut Wagener 20.07.2025  |
+   |                                     |
+   | changed channel-view to use less    |
+   | processor-time                      |
+   | changed Learn-mode to only learn    |
+   | the controller, midi-channel        |
+   | needs to be set correctly before    |
+   |                                     |
+   |                                     |
    | MIDIWOUSH VoltoMax 8                |
    |                                     |
    | Software for Midi-Controller        |
    | USB-MIDI, 8 different Voltage-      |
    | Channels, can be configured each    |
    | for own Midi-Channel and Controller |
+   |                                     |
+   | Special-controller for velocity:    |
+   | When choosing controller 3 for a    |                                    |
+   | midi-channel, a played note instead |                                    |
+   | a controller is read and velocity   |
+   | is taken for voltage-out            |
    |                                     |
    | Microcontroller: ESP32-S3           |
    | DISPLAY: OLED SH1106 128x64 1,4"    |
@@ -18,8 +33,8 @@
    | TUTORIUS                            |
    ---------------------------------------
 */
-#define SER 1
-#define SER1 1
+// #define SER 1
+// #define SER_DEBUG 1
 
 // #define LED17 1
 
@@ -37,29 +52,21 @@
 
 #include "graphics.h"
 
-//#define FRQ400KHZ 1
-#define FRQ1MHZ 1
+#define FRQ400KHZ 1
+//#define FRQ1MHZ 1
 
-// Analog-Out aktivieren
 // Voltage-Difference to lower DAC-interface-time
 #define VOLTDIF 1
 #define MILLIPLUS 10
 
+// Use Tiny-USB
 #define TINYUSB 1
-
 
 // Position of Activity-Circles
 #define YACT 55
 #define RACT 5
 #define XACT 15
 #define X1ACT 6
-
-// MINMS,MAXMS -> times for a standard servo for maximum angles
-#define MINMS 530
-#define MAXMS 2400
-// Same as Float
-#define FMINMS 530.0
-#define FMAXMS 2400.0
 
 // Keypress-times
 #define EXITPRESS 2000
@@ -91,33 +98,30 @@
 // Maximum channels
 #define MAXCHANNELS 8
 
-#define LENVERSION 16
-#define LENDATA MAXCHANNELS* MAXPAR
-
 // Preferences
 Preferences preferences;
 
 // USB MIDI object
 #ifdef TINYUSB
-Adafruit_USBD_MIDI usb_midi;
-// Create a new instance of the Arduino MIDI Library,
-// and attach usb_midi as the transport.
-MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, MIDI);
-#endif
+  Adafruit_USBD_MIDI usb_midi;
 
-#define SCREEN_WIDTH 128  // OLED display width, in pixels
-#define SCREEN_HEIGHT 64  // OLED display height, in pixels
-#define OLED_RESET -1     //   QT-PY / XIAO
+  // Create a new instance of the Arduino MIDI Library,
+  // and attach usb_midi as the transport.
+  MIDI_CREATE_INSTANCE(Adafruit_USBD_MIDI, usb_midi, MIDI);
+#endif
 
 #define FZEIL 28
 
+// Display
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // DAC
 Adafruit_MCP4728 mcp1;
 Adafruit_MCP4728 mcp2;
 
-typedef struct midicontrol {
+// Struct for storage of midi-events
+typedef struct midicontrol
+{
   byte channel;
   byte controller;
   byte value;
@@ -166,16 +170,16 @@ uint8_t midiInvert[MAXCHANNELS];
 uint16_t voltage[8];
 uint16_t oldvoltage[8];
 
-// Normale belegung
+// Normal routing of channels to plug-numbers
 uint8_t voltnr[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
 
-// Belegung geändert
+// Changed routing when soldering was wrong :) Change as needed and uncomment
 // uint8_t voltnr[8] = { 3, 2, 1, 0, 7, 6, 5, 4 };
 
 // Activity-"LEDs"
 uint16_t activity[8];
 
-uint32_t milliSave, milliSave2;
+uint32_t milliSave, milliSave2, milliSave3;
 uint8_t milliflag;
 
 //Input-Mode
@@ -188,7 +192,9 @@ int rgbpos, rgbakt;
 float rgbval;
 float rgbhell;
 
-void handleControllerChange(byte channel, byte controller, byte value) {
+// Handle for Controllerchange-Events
+void handleControllerChange(byte channel, byte controller, byte value)
+{
   receive.channel = channel;
   receive.controller = controller;
   receive.velocity=0;
@@ -199,7 +205,9 @@ void handleControllerChange(byte channel, byte controller, byte value) {
   else receive.flag2 = true;
 }
 
-void handleNoteOn(byte channel, byte pitch, byte velocity) {
+// Handle for NotoOn-Events
+void handleNoteOn(byte channel, byte pitch, byte velocity)
+{
   receive.channel = channel;
   receive.velocity = velocity;
   receive.controller=0;
@@ -209,14 +217,17 @@ void handleNoteOn(byte channel, byte pitch, byte velocity) {
   else receive.flag2 = true;
 }
 
-void handleNoteOff(byte channel, byte pitch, byte velocity) {
+// Handle for NoteOff-Events (not needed now)
+void handleNoteOff(byte channel, byte pitch, byte velocity)
+{
   receive.flag = true;
   if (receive.flag2) receive.flag2 = false;
   else receive.flag2 = true;
 }
 
 // Select I2C-Bus 0...7
-void selectBus(uint8_t bus) {
+void selectBus(uint8_t bus)
+{
   Wire.beginTransmission(0x70);  // TCA9548A address is 0x70
   Wire.write(1 << bus);          // send byte to select bus
   Wire.endTransmission();
@@ -226,7 +237,8 @@ void selectBus(uint8_t bus) {
   Calculates the Voltage for DAC
   val: 0-127, min, max 0-100
 */
-uint16_t CalcVOLT(float val, uint8_t min, uint8_t max) {
+uint16_t CalcVOLT(float val, uint8_t min, uint8_t max)
+{
   float minf, maxf, diff;
   float p1, p2;
   float px;
@@ -249,47 +261,66 @@ uint16_t CalcVOLT(float val, uint8_t min, uint8_t max) {
     Scans the key number 'keyNr' for normal presses
     and long presses
 */
-int8_t scanKey(uint8_t keyNr) {
+int8_t scanKey(uint8_t keyNr)
+{
   int8_t keyPressed1;
   // Button 'keyNr' pressed?
   keyPressed1 = -1;
-  if (!digitalRead(keyPort[keyNr])) {
+  if (!digitalRead(keyPort[keyNr]))
+  {
     // Key pressed, newly pressed?
-    if (!oldKey[keyNr]) {
+    if (!oldKey[keyNr])
+    {
       // Yes, newly pressed
       timer = millis();
       diffTime = 0;
       oldKey[keyNr] = true;
-      if ((!longMask[keyNr]) && (!repeatMask[keyNr]) && (!exitMask[keyNr])) {
+      if ((!longMask[keyNr]) && (!repeatMask[keyNr]) && (!exitMask[keyNr]))
+      {
         keyPressed1 = keyNr;
       }
-      if (deziMask[keyNr]) {
-        if (millis() - deziTimer <= DEZIPRESS) {
-          if (millis() - deziTimer >= PRELLO) {
+      if (deziMask[keyNr])
+      {
+        if (millis() - deziTimer <= DEZIPRESS)
+        {
+          if (millis() - deziTimer >= PRELLO)
+          {
             keyPressed1 = keyNr | 0x20;
             deziTimer = millis();
           }
         }
       }
-    } else {
+    }
+    else
+    {
       // No, not newly pressed
-      if (longMask[keyNr]) {
+      if (longMask[keyNr])
+      {
         // Langdruck der Taste abfragen
-        if (millis() - timer >= LONGPRESS) {
+        if (millis() - timer >= LONGPRESS)
+        {
           keyPressed1 = keyNr | 0x40;
         }
-      } else {
-        if (repeatMask[keyNr]) {
+      }
+      else
+      {
+        if (repeatMask[keyNr])
+        {
           // Repeatdruck der Taste abfragen
-          if (millis() - timer >= REPEATPRESS) {
+          if (millis() - timer >= REPEATPRESS)
+          {
             timer = millis();
             keyPressed1 = keyNr;
             oldKey[keyNr] = false;
           }
-        } else {
+        }
+        else
+        {
           // Exitdruck der Tasten abfragen
-          if (exitMask[keyNr]) {
-            if (millis() - timer > EXITPRESS) {
+          if (exitMask[keyNr])
+          {
+            if (millis() - timer > EXITPRESS)
+            {
               keyPressed1 = keyNr | 0x80;
               ready = true;
             }
@@ -297,35 +328,54 @@ int8_t scanKey(uint8_t keyNr) {
         }
       }
     }
-  } else {
+  }
+  else
+  {
     // No, pressed before?
-    if (oldKey[keyNr]) {
-      if (millis() - timer > PRELLO) {
+    if (oldKey[keyNr])
+    {
+      if (millis() - timer > PRELLO)
+      {
         oldKey[keyNr] = false;
         // Yes, pressed before
         if (deziMask[keyNr])
           deziTimer = millis();
-        if (longMask[keyNr]) {
-          if (keyPressed1 < 0) {
-            if (millis() - timer < LONGPRESS) {
+        if (longMask[keyNr])
+        {
+          if (keyPressed1 < 0)
+          {
+            if (millis() - timer < LONGPRESS)
+            {
               keyPressed1 = keyNr;
-            } else {
+            }
+            else
+            {
               keyPressed1 = keyNr | 0x40;
             }
           }
           timer = millis();
-        } else {
-          if (repeatMask[keyNr]) {
+        }
+        else
+        {
+          if (repeatMask[keyNr])
+          {
             oldKey[keyNr] = false;
-          } else {
-            if (exitMask[keyNr]) {
+          }
+          else
+          {
+            if (exitMask[keyNr])
+            {
               oldKey[keyNr] = false;
-            } else {
+            }
+            else
+            {
               oldKey[keyNr] = false;
             }
           }
         }
-      } else {
+      }
+      else
+      {
         timer = millis();
       }
     }
@@ -336,11 +386,13 @@ int8_t scanKey(uint8_t keyNr) {
 /* int scanKeys()
   Scans all Keys for Key-presses
 */
-int scanKeys() {
+int scanKeys()
+{
   int8_t keyPressed;
   uint8_t i;
   keyPressed = -1;
-  for (i = 0; i < 4; i++) {
+  for (i = 0; i < 4; i++)
+  {
     keyPressed = scanKey(i);
     if (keyPressed >= 0) break;
   }
@@ -350,25 +402,33 @@ int scanKeys() {
 /* refreshDisplay(int mode)
   Refreshes the display
 */
-void refreshDisplay(int mode) {
+void refreshDisplay(int mode)
+{
   uint8_t i, flag, posy;
   selectBus(2);
   display.clearDisplay();
   flag = false;
-  switch (mode) {
+  switch (mode)
+  {
     case 0:  // Display: Controller and Midi-Channel
       flag = false;
-      for (i = 0; i < MAXCHANNELS; i++) {
-        if (i != actPort) {
-          if ((midiController[actPort] == midiController[i]) && (midiChannel[actPort] == midiChannel[i])) {
+      for (i = 0; i < MAXCHANNELS; i++)
+      {
+        if (i != actPort)
+        {
+          if ((midiController[actPort] == midiController[i]) && (midiChannel[actPort] == midiChannel[i]))
+          {
             flag = true;
           }
         }
       }
-      if (flag) {
+      if (flag)
+      {
         display.setTextColor(SH110X_BLACK);
         display.fillRect(0, 0, 128, 64, SH110X_WHITE);
-      } else {
+      }
+      else
+      {
         display.setTextColor(SH110X_WHITE);
       }
       display.setCursor(0, 0);
@@ -393,27 +453,52 @@ void refreshDisplay(int mode) {
       refresh = false;
       break;
     case 1:  // Display: Min and Max-Values
-      display.setTextColor(SH110X_WHITE);
-      display.setCursor(0, 0);
-      display.println("MinMax");
-      sprintf(s, "PORT %d", actPort + 1);
-      display.println(s);
-      sprintf(s, "MIN %3d", midiMin[actPort]);
-      for (i = 4; i < strlen(s); i++)
-        if (s[i] == ' ') s[i] = '0';
-      display.println(s);
-      sprintf(s, "MAX %3d", midiMax[actPort]);
-      for (i = 4; i < strlen(s); i++)
-        if (s[i] == ' ') s[i] = '0';
-      display.println(s);
-      if (inputMode == 0) posy = 22 + 16;
-      else posy = 38 + 16;
-      if (!flag)
+      flag=(midiMin[actPort]<=midiMax[actPort]);
+      if (flag)
+      {
+        display.setTextColor(SH110X_WHITE);
+        display.setCursor(0, 0);
+        display.println("MinMax");
+        sprintf(s, "PORT %d", actPort + 1);
+        display.println(s);
+        sprintf(s, "MIN %3d", midiMin[actPort]);
+        for (i = 4; i < strlen(s); i++)
+          if (s[i] == ' ') s[i] = '0';
+        display.println(s);
+        sprintf(s, "MAX %3d", midiMax[actPort]);
+        for (i = 4; i < strlen(s); i++)
+          if (s[i] == ' ') s[i] = '0';
+        display.println(s);
+        if (inputMode == 0) posy = 22 + 16;
+        else posy = 38 + 16;
         display.fillCircle(128 - 11, posy, 5, SH110X_WHITE);
+        // display.fillCircle(128 - 11, posy, 5, SH110X_BLACK);
+        display.display();
+        refresh = false;
+      }
       else
+      {
+        display.setTextColor(SH110X_BLACK);
+        display.fillRect(0, 0, 128, 64, SH110X_WHITE);
+        display.setCursor(0, 0);
+        display.println("MinMax");
+        sprintf(s, "PORT %d", actPort + 1);
+        display.println(s);
+        sprintf(s, "MAX %3d", midiMin[actPort]);
+        for (i = 4; i < strlen(s); i++)
+          if (s[i] == ' ') s[i] = '0';
+        display.println(s);
+        sprintf(s, "MIN %3d", midiMax[actPort]);
+        for (i = 4; i < strlen(s); i++)
+          if (s[i] == ' ') s[i] = '0';
+        display.println(s);
+        if (inputMode == 0) posy = 22 + 16;
+        else posy = 38 + 16;
         display.fillCircle(128 - 11, posy, 5, SH110X_BLACK);
-      display.display();
-      refresh = false;
+        display.display();
+        refresh = false;
+      }
+      display.setTextColor(SH110X_WHITE);
       break;
   }
 }
@@ -421,18 +506,32 @@ void refreshDisplay(int mode) {
 /* void EditMidi(int mode)
   Edits the actual Midi-Settings
 */
-void EditMidi(int mode) {
+void EditMidi(int mode)
+{
   int keyPressed;
   int j;
+  uint8_t dummy;
+  uint8_t swapflag,learnflag;
+
+  swapflag=true;
+  learnflag=true;
 
   selectBus(2);
   display.setTextSize(2);
-  do {
-    if (refresh) {
+  do
+  {
+    if (refresh)
+    {
       refreshDisplay(mode);
     }
     keyPressed = scanKeys();
-    switch (keyPressed) {
+    if(keyPressed==-1)
+    {
+      swapflag=true;
+      learnflag=true;
+    }
+    switch (keyPressed)
+    {
       // Key Left Short
       case 0:
         if (actPort > 0) actPort--;
@@ -441,9 +540,12 @@ void EditMidi(int mode) {
         break;
       // Key Up Short
       case 1:
-        switch (mode) {
+        switch (mode)
+        { 
           case 0:
-            switch (inputMode) {
+            // Edit Conroller/Channel
+            switch (inputMode)
+            {
               case 0:
                 if (midiController[actPort] < 150) midiController[actPort]++;
                 else midiController[actPort] = 0;
@@ -457,7 +559,9 @@ void EditMidi(int mode) {
             }
             break;
           case 1:
-            switch (inputMode) {
+            // Edit MiniMax
+            switch (inputMode)
+            {
               case 0:
                 if (midiMin[actPort] < 100) midiMin[actPort]++;
                 else midiMin[actPort] = 0;
@@ -472,11 +576,14 @@ void EditMidi(int mode) {
             break;
         }
         break;
-      // Key Left Short
+      // Key Down Short
       case 2:
-        switch (mode) {
+        switch (mode)
+        {
           case 0:
-            switch (inputMode) {
+            // Edit Controller/Channel
+            switch (inputMode)
+            {
               case 0:
                 if (midiController[actPort] > 0) midiController[actPort]--;
                 else midiController[actPort] = 150;
@@ -490,7 +597,9 @@ void EditMidi(int mode) {
             }
             break;
           case 1:
-            switch (inputMode) {
+            // Edit MiniMax
+            switch (inputMode)
+            {
               case 0:
                 if (midiMin[actPort] > 0) midiMin[actPort]--;
                 else midiMin[actPort] = 100;
@@ -513,68 +622,105 @@ void EditMidi(int mode) {
         break;
       // Key up long
       case 0x41:
+        // Switch to InputMode Line1
         inputMode = 0;
         refresh = true;
         break;
       // Key down long
       case 0x42:
+        // Switch to InputMode Line2
         inputMode = 1;
         refresh = true;
         break;
       // Key Left Long
       case 0x40:
+        // Exit Edit
         ready = true;
         break;
-      // Key Right Long - Learn Midi
+      // Key Right Long - Learn Midi - Swap MiniMax
       case 0x43:
-        if (mode == 0) {
-          // Delete buffered Midi-events
+        switch(mode)
+        {
+          case 0:
+            // Edit Controller/Channel
+            // Learn Midi
+            // Delete buffered Midi-events
+            if(learnflag)
+            {
+              learnflag=false;
+              selectBus(2);
+              display.setCursor(0, 0);
+              display.fillRect(0, 0, 128, 16, SH110X_WHITE);
+              display.setTextColor(SH110X_BLACK);
+              display.printf("   LEARN");
+              display.display();
+              j = 50;
+              do
+              {
+                if (TinyUSBDevice.mounted())
+                {
+                  MIDI.read();
+                }
+                delay(10);
+                if (!receive.flag) j--;
+                receive.flag = false;
+              } while (j > 0);
 
-          selectBus(2);
-          display.setCursor(0, 0);
-          display.fillRect(0, 0, 128, 16, SH110X_WHITE);
-          display.setTextColor(SH110X_BLACK);
-          display.printf("   LEARN");
-          display.display();
-          j = 50;
-          do {
-            if (TinyUSBDevice.mounted()) {
-              MIDI.read();
-            }
-            delay(10);
-            if (!receive.flag) j--;
-            receive.flag = false;
-          } while (j > 0);
-
-          receive.flag = false;
-          do {
-            if (TinyUSBDevice.mounted()) {
-              MIDI.read();
-            }
-
-            flag = true;
-            if (receive.flag) {
-              midiController[actPort] = receive.controller;
-              midiChannel[actPort] = receive.channel - 1;
               receive.flag = false;
-              flag = false;
+              do
+              {
+                if (TinyUSBDevice.mounted())
+                {
+                  MIDI.read();
+                }
+
+                flag = true;
+                if (receive.flag)
+                {
+                  if (midiChannel[actPort]==receive.channel-1)
+                  {
+                    midiController[actPort] = receive.controller;
+                    receive.flag = false;
+                    flag = false;
+                  }
+                }
+                if (flag)
+                {
+                  if (!digitalRead(KEYLEFT)) flag = false;
+                  if (!digitalRead(KEYRIGHT)) flag = false;
+                }
+              } while (flag);
+              while ((!digitalRead(KEYLEFT)) || (!digitalRead(KEYRIGHT))) ;
+              refresh=true;
+              refreshDisplay(mode);
             }
-            if (flag) {
-              if (!digitalRead(KEYLEFT)) flag = false;
-              if (!digitalRead(KEYRIGHT)) flag = false;
+          break;
+          case 1:
+            // Edit MiniMax
+            // Swap MiniMax
+            if(swapflag)
+            {
+              swapflag=false;
+              dummy=midiMax[actPort];
+              midiMax[actPort]=midiMin[actPort];
+              midiMin[actPort]=dummy;
+              while((!digitalRead(KEYRIGHT))||(!digitalRead(KEYLEFT))) ;
+              //oldKey[KeyRight]=false;
+              refresh=true;
             }
-          } while (flag);
-          while ((!digitalRead(KEYLEFT)) || (!digitalRead(KEYRIGHT)))
-            ;
-          refreshDisplay(mode);
+            
+          break;
         }
         break;
       // Dezi Up
       case 0x21:
         deziTimer = millis();
-        switch (mode) {
+        switch (mode)
+        {
           case 0:
-            switch (inputMode) {
+            // Edit Controller/Channel
+            switch (inputMode)
+            {
               case 0:
                 if (midiController[actPort] < 150) midiController[actPort] += 8;
                 else midiController[actPort] = 0;
@@ -588,7 +734,9 @@ void EditMidi(int mode) {
             }
             break;
           case 1:
-            switch (inputMode) {
+            // Edit MiniMax
+            switch (inputMode)
+            {
               case 0:
                 if (midiMin[actPort] < 90) midiMin[actPort] += 8;
                 else midiMin[actPort] = 0;
@@ -606,9 +754,12 @@ void EditMidi(int mode) {
       // Dezi Down
       case 0x22:
         deziTimer = millis();
-        switch (mode) {
+        switch (mode)
+        {
           case 0:
-            switch (inputMode) {
+            // Edit Controler/Channel
+            switch (inputMode)
+            {
               case 0:
                 if (midiController[actPort] >= 10) midiController[actPort] -= 8;
                 else midiController[actPort] = 150;
@@ -622,7 +773,9 @@ void EditMidi(int mode) {
             }
             break;
           case 1:
-            switch (inputMode) {
+            // Edit MiniMax
+            switch (inputMode)
+            {
               case 0:
                 if (midiMin[actPort] >= 10) midiMin[actPort] -= 8;
                 else midiMin[actPort] = 100;
@@ -644,13 +797,15 @@ void EditMidi(int mode) {
 /* int ScanEditReset()
   scans Keys while performing for long keypresses
 */
-int ScanEditReset() {
+int ScanEditReset()
+{
   int keyPressed;
   int action;
   action = 0;
   ready = false;
   keyPressed = scanKeys();
-  switch (keyPressed) {
+  switch (keyPressed)
+  {
     case 0x40:
       action = 1;
       ready = true;
@@ -673,17 +828,18 @@ int ScanEditReset() {
 /* void setup()
   Main-program
 */
-void setup() {
-  float dummy;
+void setup()
+{
+  float fdummy;
   //uint16_t servoPos[3];
 
   //  midiEventPacket_t rx; ESP!!!
   int keyPressed;
   uint8_t displaystart;
   uint8_t displaymode;
+  uint8_t firstbarview;
 
 #ifdef SER
-
   Serial.begin(115200);
 #endif
 
@@ -702,7 +858,8 @@ void setup() {
 
 // ESP32 Tiny-USB MIDI EPS!!! MIDI
 #ifdef TINYUSB
-  if (!TinyUSBDevice.isInitialized()) {
+  if (!TinyUSBDevice.isInitialized())
+  {
     TinyUSBDevice.begin(0);
   }
 
@@ -710,7 +867,8 @@ void setup() {
 
   MIDI.begin(MIDI_CHANNEL_OMNI);
 
-  if (TinyUSBDevice.mounted()) {
+  if (TinyUSBDevice.mounted())
+  {
     TinyUSBDevice.detach();
     delay(10);
     TinyUSBDevice.attach();
@@ -788,11 +946,12 @@ void setup() {
   delay(500);
   // #endif
   selectBus(0);
-  if (!mcp1.begin(0x60)) {
+  if (!mcp1.begin(0x60))
+  {
     selectBus(2);
     display.printf("MCPERR1");
     display.display();
-#ifdef SER1
+#ifdef SER_DEBUG
     Serial.println("DAC1 Error");
 #endif
     for (;;)
@@ -803,11 +962,12 @@ void setup() {
   display.display();
   delay(500);
   selectBus(1);
-  if (!mcp2.begin()) {
+  if (!mcp2.begin())
+  {
     selectBus(2);
     display.printf("MCPERR2");
     display.display();
-#ifdef SER1
+#ifdef SER_DEBUG
     Serial.println("DAC2 Error");
 #endif
     for (;;)
@@ -817,7 +977,7 @@ void setup() {
   display.println("MCP2");
   display.display();
   delay(500);
-#ifdef SER1
+#ifdef SER_DEBUG
   Serial.println("DAC OK");
 #endif
   delay(1000);
@@ -841,10 +1001,14 @@ void setup() {
   pinMode(17, OUTPUT);
 
   // Test der LED
-  for (i = 0; i < 10; i++) {
-    if (i % 2 == 0) {
+  for (i = 0; i < 10; i++)
+  {
+    if (i % 2 == 0)
+    {
       digitalWrite(17, true);
-    } else {
+    }
+    else
+    {
       digitalWrite(17, false);
     }
     delay(100);
@@ -864,21 +1028,26 @@ void setup() {
   refresh = true;
   displaystart = 1;
   displaymode = 1;
+  firstbarview=true;
   oldKey[0] = oldKey[1] = oldKey[2] = oldKey[3] = false;
   ready = false;
   refresh = true;
   inputMode = 0;
   actPort = 0;
-  for (i = 0; i < 8; i++) {
+  for (i = 0; i < 8; i++)
+  {
     oldvoltage[i] = voltage[i];
     activity[i] = 0;
   }
   milliSave2 = milliSave = millis();
 
 #ifdef RGBLED
-  for (j = 0; j < 3; j++) {
-    for (i = 0; i < 100; i++) {
-      switch (j) {
+  for (j = 0; j < 3; j++)
+  {
+    for (i = 0; i < 100; i++)
+    {
+      switch (j)
+      {
         case 0:
           rgbLedWrite(RGBLED, i, 0, 0);
           break;
@@ -889,19 +1058,21 @@ void setup() {
           rgbLedWrite(RGBLED, 0, 0, i);
           break;
       }
-      delay(10);
+      delay(3);
     }
   }
   rgbLedWrite(RGBLED, 0, 0, 0);
 #endif
 
-  do {
+  do
+  {
     if (millis() - rgbtimer > 50)
     {
       rgbtimer = millis();
       rgbval += 1;
       rgbakt = (int)(rgbval * rgbhell / 100.0);
-      switch (rgbpos) {
+      switch (rgbpos)
+      {
         case 0:  // Wird Rot aus Weiss
           rgbLedWrite(RGBLED, (int)rgbhell, (int)rgbhell - rgbakt, (int)rgbhell - rgbakt);
           break;
@@ -924,7 +1095,8 @@ void setup() {
           rgbLedWrite(RGBLED, (int)rgbhell, rgbakt, (int)rgbhell);
           break;
       }
-      if (rgbval >= 100) {
+      if (rgbval >= 100)
+      {
         rgbval = 0;
         rgbpos++;
         if (rgbpos > 6) rgbpos = 0;
@@ -935,16 +1107,22 @@ void setup() {
     // Manual call tud_task since it isn't called by Core's background
     TinyUSBDevice.task();
 #endif
-    if (TinyUSBDevice.mounted()) {
+    if (TinyUSBDevice.mounted())
+    {
       MIDI.read();
 
     }
 #ifdef LED17
-    else {
-      for (i = 0; i < 10; i++) {
-        if (i % 2 == 0) {
+    else
+    {
+      for (i = 0; i < 10; i++)
+      {
+        if (i % 2 == 0)
+        {
           digitalWrite(17, true);
-        } else {
+        }
+        else
+        {
           digitalWrite(17, false);
         }
         delay(100);
@@ -961,13 +1139,16 @@ void setup() {
       display.display();
       delay(1000);  
       } */
-    if (displaystart > 0) {
-      switch (displaymode) {
+    if (displaystart > 0)
+    {
+      switch (displaymode)
+      {
         case 1:
           selectBus(2);
           display.clearDisplay();
           display.drawBitmap(0, 0, myBitmap, 128, 20, SH110X_WHITE);
-          if (displaystart == 1) {
+          if (displaystart == 1)
+          {
             display.setTextSize(1);
             display.setCursor(0, FZEIL);
             display.println("V8 Vers. 0.5");
@@ -994,7 +1175,8 @@ void setup() {
           display.display();
           delay(2000);
           display.clearDisplay();
-          for (i = 0; i < SCREEN_WIDTH; i += SCREEN_WIDTH / 8) {
+          for (i = 0; i < SCREEN_WIDTH; i += SCREEN_WIDTH / 8)
+          {
             display.drawRect(i, 0, i + SCREEN_WIDTH / 8, SCREEN_WIDTH / 8, SCREEN_HEIGHT);
           }
           display.display();
@@ -1005,14 +1187,17 @@ void setup() {
     ready = false;
     keyPressed = ScanEditReset();
     ready = false;
-    if (keyPressed > 0) {
+    if (keyPressed > 0)
+    {
       ready = false;
-      do {
+      do
+      {
         if ((digitalRead(KEYLEFT)) && (digitalRead(KEYRIGHT))) ready = true;
       } while (!ready);
     }
     //oldKey[0] = oldKey[1] = oldKey[2] = oldKey[3] = false;
-    switch (keyPressed) {
+    switch (keyPressed)
+    {
       case 1:  // Edit Midi-Config
         ready = false;
         refresh = true;
@@ -1021,7 +1206,8 @@ void setup() {
         actPort = 0;
         EditMidi(0);
         ready = false;
-        do {
+        do
+        {
           if ((digitalRead(KEYLEFT)) && (digitalRead(KEYRIGHT))) ready = true;
         } while (!ready);
         keyPressed = 0;
@@ -1031,7 +1217,8 @@ void setup() {
         inputMode = 0;
         EditMidi(1);
         ready = false;
-        do {
+        do
+        {
           if ((digitalRead(KEYLEFT)) && (digitalRead(KEYRIGHT))) ready = true;
         } while (!ready);
         // Preferences abspeichern
@@ -1077,6 +1264,7 @@ void setup() {
         displaystart = 1;
         break;
       case 2:  // View Channels as Bars, Exit by L-Press
+        firstbarview=true;
         if (displaymode++ == 2) displaymode = 1;
         ready = false;
         refresh = true;
@@ -1097,9 +1285,11 @@ void setup() {
         if (rgbhell < 10) rgbhell = 0;
         break;
     }
-    if (keyPressed > 0) {
+    if (keyPressed > 0)
+    {
       ready = false;
-      do {
+      do
+      {
         if ((digitalRead(KEYLEFT)) && (digitalRead(KEYRIGHT))) ready = true;
       } while (!ready);
       oldKey[0] = oldKey[1] = oldKey[2] = oldKey[3] = false;
@@ -1115,10 +1305,11 @@ void setup() {
       {
         if (midiController[i] != 3)
         {
-          if ((receive.channel == midiChannel[i] + 1) && (receive.controller == midiController[i])) {
-            dummy = (float)receive.value;
-            dummy = dummy / 127.0;
-            voltage[i] = CalcVOLT(dummy, midiMin[i], midiMax[i]);
+          if ((receive.channel == midiChannel[i] + 1) && (receive.controller == midiController[i]))
+          {
+            fdummy = (float)receive.value;
+            fdummy = fdummy / 127.0;
+            voltage[i] = CalcVOLT(fdummy, midiMin[i], midiMax[i]);
             if (activity[i] < 2)
               activity[i]++;
           }
@@ -1129,9 +1320,9 @@ void setup() {
           // Note lesen, Velocity ausgeben auf Servo oder Port
           {
             //ESP!!! MIDI
-            dummy=(float)receive.velocity;
-            dummy = dummy / 127.0;
-            voltage[i] = CalcVOLT(dummy, midiMin[i], midiMax[i]);
+            fdummy=(float)receive.velocity;
+            fdummy = fdummy / 127.0;
+            voltage[i] = CalcVOLT(fdummy, midiMin[i], midiMax[i]);
             if(activity[i]<2)
               activity[i]++;
           }
@@ -1139,104 +1330,159 @@ void setup() {
       }
       milliflag = milliSave2 + MILLIPLUS > millis();
       if (milliflag) milliSave2 = millis();
-      for (i = 0; i < 4; i++) {
-        //sprintf(s,"%d",voltage[i]);
-        //Serial.println(s);
-        switch (i) {
+      for (i = 0; i < 4; i++)
+      {
+        switch (i)
+        {
           case 0:
             selectBus(0);
 
-            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag))
+            {
               mcp1.setChannelValue(MCP4728_CHANNEL_A, voltage[voltnr[i]]);
             }
 
             selectBus(1);
 
-            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag))
+            {
               mcp2.setChannelValue(MCP4728_CHANNEL_A, voltage[voltnr[i + 4]]);
             }
             break;
           case 1:
             selectBus(0);
 
-            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag))
+            {
               mcp1.setChannelValue(MCP4728_CHANNEL_B, voltage[voltnr[i]]);
             }
 
             selectBus(1);
 
-            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag))
+            {
               mcp2.setChannelValue(MCP4728_CHANNEL_B, voltage[voltnr[i + 4]]);
             }
             break;
           case 2:
             selectBus(0);
 
-            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag))
+            {
               mcp1.setChannelValue(MCP4728_CHANNEL_C, voltage[voltnr[i]]);
             }
 
             selectBus(1);
 
-            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag))
+            {
               mcp2.setChannelValue(MCP4728_CHANNEL_C, voltage[voltnr[i + 4]]);
             }
             break;
           case 3:
             selectBus(0);
 
-            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i]] - voltage[voltnr[i]]) > VOLTDIF) || (milliflag))
+            {
               mcp1.setChannelValue(MCP4728_CHANNEL_D, voltage[voltnr[i]]);
             }
 
             selectBus(1);
 
-            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag)) {
+            if ((abs(oldvoltage[voltnr[i + 4]] - voltage[voltnr[i + 4]]) > VOLTDIF) || (milliflag))
+            {
               mcp2.setChannelValue(MCP4728_CHANNEL_D, voltage[voltnr[i + 4]]);
             }
             break;
         }
       }
     }
-    if (((displaymode == 1) && (millis() > milliSave + 500)) || ((displaymode == 2) && (millis() > milliSave + 100))) {
+    if (((displaymode == 1) && (millis() > milliSave + 500)) || ((displaymode == 2) && (millis() > milliSave + 100)))
+    {
       milliSave = millis();
       selectBus(2);
       if (displaymode == 1)
         display.fillRect(X1ACT - RACT, YACT - RACT, 9 * XACT + 2 * RACT, 2 * RACT, SH110X_BLACK);
       else
-        display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SH110X_BLACK);
-      for (i = 0; i < MAXCHANNELS; i++) {
+      {
+        if (firstbarview)
+        {
+          display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SH110X_BLACK);
+          for(i=0;i<MAXCHANNELS;i++)
+          {
+            display.drawRect(i*SCREEN_WIDTH/8,0,SCREEN_WIDTH/8,64,SH110X_WHITE);
+          }
+        }
+      }
+      for (i = 0; i < MAXCHANNELS; i++)
+      {
         selectBus(2);
-        if (activity[i] > 0) {
-          switch (displaymode) {
+        if (activity[i] > 0)
+        {
+          switch (displaymode)
+          {
             case 1:
               display.fillCircle(X1ACT + XACT / 2 + i * XACT, YACT, RACT, SH110X_WHITE);
               activity[i]--;
               break;
             case 2:
-              display.drawRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_WHITE);
-              display.fillRect(i * SCREEN_WIDTH / 8, 63, SCREEN_WIDTH / 8, -voltage[i] / 64, SH110X_WHITE);
+              if (firstbarview)
+              {
+                display.fillRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_BLACK);
+                display.drawRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_WHITE);
+                display.fillRect(i * SCREEN_WIDTH / 8, 63, SCREEN_WIDTH / 8, -voltage[i] / 64, SH110X_WHITE);
+              }
+              else
+              {
+/// XXX
+                if (voltage[i]/64!=oldvoltage[i]/64)
+                {
+                  display.fillRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_BLACK);
+                  display.drawRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_WHITE);
+                  display.fillRect(i * SCREEN_WIDTH / 8, 63, SCREEN_WIDTH / 8, -voltage[i] / 64, SH110X_WHITE);
+                }
+              }
               activity[i]--;
               break;
           }
-        } else {
-          switch (displaymode) {
+        }
+        else
+        {
+          switch (displaymode)
+          {
             case 1:
               display.drawCircle(X1ACT + XACT / 2 + i * XACT, YACT, RACT, SH110X_WHITE);
               break;
             case 2:
-              display.drawRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_WHITE);
-              display.fillRect(i * SCREEN_WIDTH / 8, 63, SCREEN_WIDTH / 8, -voltage[i] / 64, SH110X_WHITE);
+              if (firstbarview)
+              {
+                display.fillRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_BLACK);
+                display.drawRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_WHITE);
+                display.fillRect(i * SCREEN_WIDTH / 8, 63, SCREEN_WIDTH / 8, -voltage[i] / 64, SH110X_WHITE);
+              }
+              else
+              {
+                if (voltage[i]/64!=oldvoltage[i]/64)
+                {
+                  display.fillRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_BLACK);
+                  display.drawRect(i * SCREEN_WIDTH / 8, 0, SCREEN_WIDTH / 8, 64, SH110X_WHITE);
+                  display.fillRect(i * SCREEN_WIDTH / 8, 63, SCREEN_WIDTH / 8, -voltage[i] / 64, SH110X_WHITE);
+                }
+              }
               break;
           }
         }
-        if (voltage[i] != oldvoltage[i]) {
+        if (voltage[i] != oldvoltage[i])
+        {
           oldvoltage[i] = voltage[i];
           // display.fillCircle(X1ACT+XACT/2+i*XACT,YACT,RACT,SH110X_WHITE);
-        } else {
+        }
+        else
+        {
           //            display.drawCircle(X1ACT+XACT/2+i*XACT,YACT,RACT,SH110X_WHITE);
         }
       }
+      if (firstbarview) firstbarview=false;
       display.display();
     }
   } while (1 == 1);
