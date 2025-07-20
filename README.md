@@ -18,4 +18,6 @@ PCBWay-Link to project
 e.) 3D-files
 Files for frontplate, mounting-things, casing for use out of modular System
 
+More Info about use and problems:
 
+At the time i did not find a way to alter the "Midi-Name" (Its something like "ESP32S3_DEV MIDI 1"). Would be nice if it can be named "MIDIWOUSH-V8". Will try to get a solution for this.
