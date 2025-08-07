@@ -95,6 +95,9 @@
 // Port für RGB-LED
 #define RGBLED 48
 
+// RGB-LED-Helligkeit Blink
+#define RGBLEDHELL 128
+
 // Maximum channels
 #define MAXCHANNELS 8
 
@@ -122,16 +125,18 @@ Adafruit_MCP4728 mcp2;
 // Struct for storage of midi-events
 typedef struct midicontrol
 {
-  byte channel;
-  byte controller;
-  byte value;
-  byte pitch;
-  byte velocity;
-  byte flag;
-  byte flag2;
+  uint32_t timestamp;
+  uint8_t mode; // 0 : leer ; 1 : Controller ; 2 : Note
+  uint8_t channel;
+  uint8_t val1;
+  uint8_t val2;
+  int16_t previous;
+  int16_t next;
 } MIDICONTROL;
 
-MIDICONTROL receive;
+MIDICONTROL midibuffer[100];
+int16_t first,last;
+uint8_t midienable;
 
 // Global variables
 // Save old keypresses
@@ -195,34 +200,124 @@ float rgbhell;
 // Handle for Controllerchange-Events
 void handleControllerChange(byte channel, byte controller, byte value)
 {
-  receive.channel = channel;
-  receive.controller = controller;
-  receive.velocity=0;
-  receive.pitch=0;
-  receive.value = value;
-  receive.flag = true;
-  if (receive.flag2) receive.flag2 = false;
-  else receive.flag2 = true;
+  uint8_t i;
+  if(!midienable) return;
+  cli();
+  i=0;
+  
+  while((midibuffer[i].mode!=0)&&(i<100))
+  {
+    i++;
+  }
+  if(i<100)
+  {
+    midibuffer[i].timestamp=millis();
+    midibuffer[i].channel=channel;
+    midibuffer[i].mode=1;
+    midibuffer[i].val1=controller;
+    midibuffer[i].val2=value;
+    if (first==-1)
+    {
+      first=i; last=i;
+      midibuffer[i].next=-1;
+      midibuffer[i].previous=-1;
+    }
+    else
+    {
+      midibuffer[i].previous=last;
+      midibuffer[last].next=i;
+      last=i;
+    }
+  }
+  sei();
 }
 
 // Handle for NotoOn-Events
 void handleNoteOn(byte channel, byte pitch, byte velocity)
 {
-  receive.channel = channel;
-  receive.velocity = velocity;
-  receive.controller=0;
-  receive.value=0;
-  receive.flag = true;
-  if (receive.flag2) receive.flag2 = false;
-  else receive.flag2 = true;
+  uint8_t i;
+  if(!midienable) return;
+  cli();
+  i=0;
+  while((midibuffer[i].mode!=0)&&(i<100))
+  {
+    i++;
+  }
+  if(i<100)
+  {
+    midibuffer[i].timestamp=millis();
+    midibuffer[i].channel=channel;
+    midibuffer[i].mode=2;
+    midibuffer[i].val1=pitch;
+    midibuffer[i].val2=velocity;
+    if (first==-1)
+    {
+      first=i; last=i;
+      midibuffer[i].next=-1;
+      midibuffer[i].previous=-1;
+    }
+    else
+    {
+      midibuffer[i].previous=last;
+      midibuffer[last].next=i;
+      last=i;
+    }
+  }
+  sei();
+}
+
+int16_t getFirst()
+{
+  return(first);
+}
+
+int16_t getLast()
+{
+  return(last);
+}
+
+int16_t getNextFree()
+{
+  int16_t i,j;
+  j=-1;
+  for(i=0;i<100;i++)
+  {
+    if(midibuffer[i].mode==0)
+    {
+      j=i;
+      break;
+    }
+  }
+  return(j);
+}
+
+int16_t delFirst()
+{
+  if(first==-1)
+    return(-1);
+  else
+  {
+    if(midibuffer[first].mode==0)
+    {
+      first=-1;
+      return(-1);
+    }
+    else
+    {
+      midibuffer[first].mode=0;
+      first=midibuffer[first].next;
+      if(first>=0)
+        midibuffer[first].previous=-1;
+    }
+  }
+  return(first);
 }
 
 // Handle for NoteOff-Events (not needed now)
 void handleNoteOff(byte channel, byte pitch, byte velocity)
 {
-  receive.flag = true;
-  if (receive.flag2) receive.flag2 = false;
-  else receive.flag2 = true;
+  if(!midienable) return;
+
 }
 
 // Select I2C-Bus 0...7
@@ -512,14 +607,53 @@ void EditMidi(int mode)
   int j;
   uint8_t dummy;
   uint8_t swapflag,learnflag;
+  uint8_t learnmode; // mode 0 -> Listen on actual channel; mode 1 -> Listen on all channels
 
+  uint8_t rgbflash; // 0-> rot ; 1-> blau; 2-> grün
+  uint8_t rgbanaus;
+  uint32_t rgbtimer;
+  uint32_t buffertimer;
+
+  rgbtimer=millis();
   swapflag=true;
   learnflag=true;
+  learnmode=0;
+  rgbflash=0;
+  rgbanaus=true;
 
+
+  
   selectBus(2);
   display.setTextSize(2);
   do
   {
+    if (TinyUSBDevice.mounted())
+    {
+      MIDI.read();
+    }
+
+    if (millis()>rgbtimer+500)
+    {
+      rgbtimer=millis();
+      if(rgbanaus)
+      {
+        switch(mode)
+        {
+          case 0:
+            rgbLedWrite(RGBLED, RGBLEDHELL, 0, 0);
+            break;
+          case 1:
+            rgbLedWrite(RGBLED,0,RGBLEDHELL,0);
+            break;
+        }
+        rgbanaus=false;
+      }
+      else
+      {
+        rgbLedWrite(RGBLED, 0, 0, 0);
+        rgbanaus=true;
+      }
+    }
     if (refresh)
     {
       refreshDisplay(mode);
@@ -645,56 +779,130 @@ void EditMidi(int mode)
             // Edit Controller/Channel
             // Learn Midi
             // Delete buffered Midi-events
+            while(!digitalRead(KEYRIGHT));
             if(learnflag)
             {
+              first=-1;
+              last=-1;
+              for(i=0;i<100;i++) midibuffer[i].mode=0;
+              midienable=true;
+              rgbflash=1;
               learnflag=false;
               selectBus(2);
               display.setCursor(0, 0);
               display.fillRect(0, 0, 128, 16, SH110X_WHITE);
               display.setTextColor(SH110X_BLACK);
-              display.printf("   LEARN");
+              display.printf("   LEARN1");
               display.display();
-              j = 50;
+              j = 50000;
+              rgbtimer=millis();
+              rgbanaus=true;
+              rgbLedWrite(RGBLED, 0, 0, RGBLEDHELL);
+              // Buffer leeren
+              buffertimer=millis();
+              // MIDI-Buffer löschen
+              learnmode=0;
+              // BBB
+              flag=true;
+              first=-1;
+              last=-1;
+              for(i=0;i<100;i++)
+              {
+                midibuffer[i].mode=0;
+              }
               do
               {
                 if (TinyUSBDevice.mounted())
                 {
                   MIDI.read();
                 }
-                delay(10);
-                if (!receive.flag) j--;
-                receive.flag = false;
-              } while (j > 0);
-
-              receive.flag = false;
-              do
-              {
-                if (TinyUSBDevice.mounted())
+                if(millis()>rgbtimer+500)
                 {
-                  MIDI.read();
+                  if(rgbanaus)
+                  {
+                    rgbanaus=false;
+                    rgbLedWrite(RGBLED,0,0,0);
+                  }
+                  else
+                  {
+                    rgbanaus=true;
+                    switch(learnmode)
+                    {
+                      case 0:
+                        rgbLedWrite(RGBLED,0,0,RGBLEDHELL);
+                        break;
+                      case 1:
+                        rgbLedWrite(RGBLED,RGBLEDHELL,RGBLEDHELL,0);
+                        break;
+                    }
+                  }
+                  rgbtimer=millis();
                 }
 
                 flag = true;
-                if (receive.flag)
+                if (first!=-1)
                 {
-                  if (midiChannel[actPort]==receive.channel-1)
+                  cli();
+                  if(midibuffer[first].mode==1)
                   {
-                    midiController[actPort] = receive.controller;
-                    receive.flag = false;
-                    flag = false;
+                    switch(learnmode)
+                    {
+                      case 0:
+                        if (midiChannel[actPort]==midibuffer[first].channel-1)
+                        {
+                          midiController[actPort] = midibuffer[first].val1;
+                          flag=false;
+                        }
+                        break;
+                      case 1:
+                        midiController[actPort]=midibuffer[first].channel-1;
+                        midiController[actPort]=midibuffer[first].val1;
+                        flag=false;
+                        break;
+                    }
                   }
+                  midibuffer[first].mode=0;
+                  first=midibuffer[first].next;
+                  if(first!=-1)
+                    midibuffer[first].previous=-1;
+                  sei();
                 }
                 if (flag)
                 {
-                  if (!digitalRead(KEYLEFT)) flag = false;
-                  if (!digitalRead(KEYRIGHT)) flag = false;
+                  if (!digitalRead(KEYLEFT))
+                  {
+                    if(learnmode==0) learnmode=1;
+                    else learnmode=0;
+                    selectBus(2);
+                    display.setCursor(0, 0);
+                    display.fillRect(0, 0, 128, 16, SH110X_WHITE);
+                    display.setTextColor(SH110X_BLACK);
+                    switch(learnmode)
+                    {
+                      case 0:
+                        display.printf("   LEARN1");
+                        break;
+                      case 1:
+                        display.printf("   LEARN2");
+                        break;
+                    }
+                    display.display();
+                    while(!digitalRead(KEYLEFT));
+                    delay(100);
+                  }
+                  if (!digitalRead(KEYRIGHT))
+                  {
+                    flag = false;
+                  }
                 }
               } while (flag);
               while ((!digitalRead(KEYLEFT)) || (!digitalRead(KEYRIGHT))) ;
               refresh=true;
               refreshDisplay(mode);
+              midienable=false;
             }
-          break;
+            rgbflash=0;
+            break;
           case 1:
             // Edit MiniMax
             // Swap MiniMax
@@ -839,6 +1047,10 @@ void setup()
   uint8_t displaymode;
   uint8_t firstbarview;
 
+  // Erster Midi-Eintrag = -1 -> Keine Noten im Speicher
+  midienable=false;
+  first=-1;
+
 #ifdef SER
   Serial.begin(115200);
 #endif
@@ -846,8 +1058,6 @@ void setup()
   // Preferences
   preferences.begin("midiwoush", false);
 
-  receive.flag = false;
-  receive.flag2 = false;
   Wire.begin(4, 5);
 #ifdef FRQ400KHZ
   Wire.setClock(400000);
@@ -915,7 +1125,7 @@ void setup()
   rgbpos = 0;
   rgbval = 0;
   rgbakt = 0;
-  rgbhell = 50;
+  rgbhell = 100;
   rgbtimer = millis();
   inputMode = 0;
   oldKey[0] = oldKey[1] = oldKey[2] = oldKey[3] = false;
@@ -949,7 +1159,7 @@ void setup()
   if (!mcp1.begin(0x60))
   {
     selectBus(2);
-    display.printf("MCPERR1");
+    display.printf("DAC1ERR");
     display.display();
 #ifdef SER_DEBUG
     Serial.println("DAC1 Error");
@@ -958,14 +1168,14 @@ void setup()
       ;  // Don't proceed, loop forever
   }
   selectBus(2);
-  display.println("MCP1");
+  display.println("DAC1");
   display.display();
   delay(500);
   selectBus(1);
   if (!mcp2.begin())
   {
     selectBus(2);
-    display.printf("MCPERR2");
+    display.printf("DAC2ERR");
     display.display();
 #ifdef SER_DEBUG
     Serial.println("DAC2 Error");
@@ -974,7 +1184,7 @@ void setup()
       ;  // Don't proceed, loop forever
   }
   selectBus(2);
-  display.println("MCP2");
+  display.println("DAC2");
   display.display();
   delay(500);
 #ifdef SER_DEBUG
@@ -1064,6 +1274,15 @@ void setup()
   rgbLedWrite(RGBLED, 0, 0, 0);
 #endif
 
+// Clear Midibuffer
+  first=-1;
+  last=-1;
+  for(i=0;i<100;i++)
+  {
+    midibuffer[i].mode=0;
+  }
+  sei();
+  midienable=true;
   do
   {
     if (millis() - rgbtimer > 50)
@@ -1112,26 +1331,6 @@ void setup()
       MIDI.read();
 
     }
-#ifdef LED17
-    else
-    {
-      for (i = 0; i < 10; i++)
-      {
-        if (i % 2 == 0)
-        {
-          digitalWrite(17, true);
-        }
-        else
-        {
-          digitalWrite(17, false);
-        }
-        delay(100);
-      }
-      digitalWrite(17, false);
-    }
-
-    digitalWrite(17, receive.flag2);
-#endif
     /* if (receive.flag)
     {
       selectBus(2);
@@ -1204,6 +1403,7 @@ void setup()
         inputMode = 0;
         oldKey[0] = oldKey[1] = oldKey[2] = oldKey[3] = false;
         actPort = 0;
+        midienable=false;
         EditMidi(0);
         ready = false;
         do
@@ -1216,6 +1416,7 @@ void setup()
         refresh = true;
         inputMode = 0;
         EditMidi(1);
+        midienable=true;
         ready = false;
         do
         {
@@ -1297,17 +1498,16 @@ void setup()
     keyPressed = 0;
     // rx=MidiUSB.read(); ESP!!!
 
-    if (receive.flag)  // ESP!!! MIDI
+    if (first!=-1)  // ESP!!! MIDI
     {
-
-      receive.flag = false;
+      cli();
       for (i = 0; i < MAXCHANNELS; i++)
       {
         if (midiController[i] != 3)
         {
-          if ((receive.channel == midiChannel[i] + 1) && (receive.controller == midiController[i]))
+          if ((midibuffer[first].channel == midiChannel[i] + 1) && (midibuffer[first].mode==1) && (midibuffer[first].val1 == midiController[i]))
           {
-            fdummy = (float)receive.value;
+            fdummy = (float)midibuffer[first].val2;
             fdummy = fdummy / 127.0;
             voltage[i] = CalcVOLT(fdummy, midiMin[i], midiMax[i]);
             if (activity[i] < 2)
@@ -1316,11 +1516,11 @@ void setup()
         }
         else
         {
-          if ((receive.channel == midiChannel[i]+1)&&(receive.controller==0))
+          if ((midibuffer[first].channel == midiChannel[i]+1)&&(midibuffer[first].mode==2))
           // Note lesen, Velocity ausgeben auf Servo oder Port
           {
             //ESP!!! MIDI
-            fdummy=(float)receive.velocity;
+            fdummy=(float)midibuffer[first].val2;
             fdummy = fdummy / 127.0;
             voltage[i] = CalcVOLT(fdummy, midiMin[i], midiMax[i]);
             if(activity[i]<2)
@@ -1328,6 +1528,13 @@ void setup()
           }
         }
       }
+      midibuffer[first].mode=0;
+      first=midibuffer[first].next;
+      if(first!=-1)
+        midibuffer[first].previous=-1;
+      else
+        last=-1;
+      sei();
       milliflag = milliSave2 + MILLIPLUS > millis();
       if (milliflag) milliSave2 = millis();
       for (i = 0; i < 4; i++)
