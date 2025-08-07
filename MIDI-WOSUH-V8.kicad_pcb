@@ -7,6 +7,12 @@
 		(legacy_teardrops no)
 	)
 	(paper "A4")
+	(title_block
+		(title "MIDIWOUSH V8 PCB")
+		(date "2025-07-26")
+		(rev "1")
+		(company "Tutorius GbR")
+	)
 	(layers
 		(0 "F.Cu" signal)
 		(2 "B.Cu" signal)
@@ -64,18 +70,18 @@
 			(dxfusepcbnewfont yes)
 			(psnegative no)
 			(psa4output no)
-			(plot_black_and_white no)
+			(plot_black_and_white yes)
 			(sketchpadsonfab no)
 			(plotpadnumbers no)
 			(hidednponfab no)
 			(sketchdnponfab no)
 			(crossoutdnponfab no)
 			(subtractmaskfromsilk no)
-			(outputformat 5)
+			(outputformat 1)
 			(mirror no)
-			(drillshape 1)
+			(drillshape 0)
 			(scaleselection 1)
-			(outputdirectory "SVG/")
+			(outputdirectory "GERBER1/")
 		)
 	)
 	(net 0 "")
@@ -12105,7 +12111,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "46,736"
+		(gr_text "46.736"
 			(at 28.06 94.996 90)
 			(layer "Dwgs.User")
 			(uuid "08e446e5-7540-4af0-9623-2025a08dc2c6")
@@ -12143,7 +12149,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "18,8468"
+		(gr_text "18.8468"
 			(at 104.4194 160.9528 0)
 			(layer "Dwgs.User")
 			(uuid "170c01ef-0108-4e15-8eab-88e6d5cf2758")
@@ -12181,7 +12187,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "56,896"
+		(gr_text "56.896"
 			(at 62.992 178.1232 0)
 			(layer "Dwgs.User")
 			(uuid "33bf1993-2371-4350-b081-0239e4c97220")
@@ -12219,7 +12225,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "27,94"
+		(gr_text "27.94"
 			(at 25.2406 57.658 90)
 			(layer "Dwgs.User")
 			(uuid "416c8880-801f-43a1-898b-bf7d11bba38b")
@@ -12257,7 +12263,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "37,084"
+		(gr_text "37.084"
 			(at 140.963 62.23 90)
 			(layer "Dwgs.User")
 			(uuid "57d8b100-4688-4627-94c3-b27f8b2f7596")
@@ -12295,7 +12301,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "3,9624"
+		(gr_text "3.9624"
 			(at 123.9012 28.0346 0)
 			(layer "Dwgs.User")
 			(uuid "75cdbccf-0d20-4cb6-b85c-aec3682767b4")
@@ -12333,7 +12339,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "35,56"
+		(gr_text "35.56"
 			(at 20.4146 139.7 90)
 			(layer "Dwgs.User")
 			(uuid "83f0522b-1107-458a-a274-7516884e0a69")
@@ -12371,7 +12377,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "116,84"
+		(gr_text "116.84"
 			(at 133.3176 99.06 90)
 			(layer "Dwgs.User")
 			(uuid "95a40ee1-2d98-4ec6-bc29-99cea2c37bc4")
@@ -12409,7 +12415,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "3,048"
+		(gr_text "3.048"
 			(at 36.068 30.8032 0)
 			(layer "Dwgs.User")
 			(uuid "c5a28548-f8ce-489c-b3a9-d806797ac3f8")
@@ -12447,7 +12453,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "91,3384"
+		(gr_text "91.3384"
 			(at 80.2132 35.6546 0)
 			(layer "Dwgs.User")
 			(uuid "cc3fd557-45a7-4b75-ad58-b52696db03cb")
@@ -12485,7 +12491,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "3,048"
+		(gr_text "3.048"
 			(at 37.592 46.3988 0)
 			(layer "Dwgs.User")
 			(uuid "d743b84b-d748-498e-8af7-3ab0f118c33d")
@@ -12523,7 +12529,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "57,404"
+		(gr_text "57.404"
 			(at 66.294 161.0798 0)
 			(layer "Dwgs.User")
 			(uuid "f8182b15-fe99-4b8d-b5f6-1856552648c9")
@@ -12561,7 +12567,7 @@
 			(extension_offset 0.5)
 			(keep_text_aligned yes)
 		)
-		(gr_text "73,1012"
+		(gr_text "73.1012"
 			(at 141.09 117.3226 90)
 			(layer "Dwgs.User")
 			(uuid "fc2d6435-0177-4f27-8539-f96474bff73a")

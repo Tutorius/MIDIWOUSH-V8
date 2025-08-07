@@ -610,10 +610,10 @@
       "gencad": "",
       "idf": "",
       "netlist": "",
-      "plot": "SVG/",
+      "plot": "GERBER1/",
       "pos_files": "",
       "specctra_dsn": "MIDI-WOSUH-V8.dsn",
-      "step": "",
+      "step": "MIDI-WOSUH-V8.step",
       "svg": "",
       "vrml": ""
     },
